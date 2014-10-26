@@ -44,8 +44,14 @@ struct ConvNode {
 
 struct ConvNode *hash[HASH_SIZE];
 
-static int hash_find(PurpleConversation *conv, int sending) {
-	int key = ((long long)conv) % HASH_SIZE;
+static int
+hash_calc(PurpleConversation *conv) {
+	return ((long long)conv) % HASH_SIZE;
+}
+
+static int
+hash_find(PurpleConversation *conv, int sending) {
+	int key = hash_calc(conv);
 	struct ConvNode *p = hash[key];
 	while (p != NULL) {
 		if (p->key == conv) {
@@ -63,6 +69,26 @@ static int hash_find(PurpleConversation *conv, int sending) {
 	return -1;
 }
 
+void
+hash_delete(PurpleConversation *conv) {
+	int key = hash_calc(conv);
+	struct ConvNode *p = hash[key];
+	struct ConvNode *last = NULL;
+	while (p != NULL) {
+		if (p->key == conv) {
+			if (last == NULL) {
+				hash[key] = p->next;
+			} else {
+				last->next = p->next;
+			}
+			free(p);
+			return;
+		}
+		last = p;
+		p = p->next;
+	}
+}
+
 static gboolean
 addnewline_msg_cb(PurpleAccount *account, char *sender, char **message,
 					 PurpleConversation *conv, PurpleMessageFlags flags, void *data)
@@ -78,7 +104,10 @@ addnewline_msg_cb(PurpleAccount *account, char *sender, char **message,
 		fprintf(stderr, "who:  %s\n", sender);
 		fprintf(stderr, "msg:  %s\n", *message);
 		fprintf(stderr, "send: %d\n", now_sending);
-		int last_sending = hash_find(conv, now_sending);
+		int last_sending = -1;
+		if (purple_conversation_get_type(conv) == PURPLE_CONV_TYPE_IM) {
+			last_sending = hash_find(conv, now_sending);
+		}
 		if (last_sending == now_sending) {
 //			*flags |= PURPLE_MESSAGE_RAW;
 		} else {
@@ -89,6 +118,11 @@ addnewline_msg_cb(PurpleAccount *account, char *sender, char **message,
 	}
 
 	return FALSE;
+}
+
+static void
+deleteconv_cb(PurpleConversation *conv, void *data) {
+	hash_delete(conv);
 }
 
 static PurplePluginPrefFrame *
@@ -119,6 +153,8 @@ plugin_load(PurplePlugin *plugin)
 						plugin, PURPLE_CALLBACK(addnewline_msg_cb), NULL);
 	purple_signal_connect(conversation, "writing-chat-msg",
 						plugin, PURPLE_CALLBACK(addnewline_msg_cb), NULL);
+	purple_signal_connect(conversation, "deleting-conversation",
+						plugin, PURPLE_CALLBACK(deleteconv_cb), NULL);
 
 	return TRUE;
 }
